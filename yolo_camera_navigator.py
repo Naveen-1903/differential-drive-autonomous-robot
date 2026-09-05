@@ -37,11 +37,11 @@ class Nav(Node):
         super().__init__("yolo_camera_navigator")
         d=self.declare_parameter
         d("goal_x",26.0); d("goal_y",0.0); d("goal_tolerance",1.2)
-        d("cruise_speed",0.7); d("min_speed",0.30); d("reverse_speed",0.35); d("angular_max",1.2)
-        d("heading_gain",1.0); d("k_center",20.0); d("k_side",28.0); d("slow_gain",4.0)
-        d("block_area_frac",0.007); d("reverse_area",0.16); d("lower_band",0.30)
-        d("avoid_lock_time",1.5); d("steer_smooth",0.25); d("speed_smooth",0.30)
-        d("region_window",6); d("max_ang_rate",2.5)
+        d("cruise_speed",0.7); d("min_speed",0.30); d("reverse_speed",0.35); d("angular_max",0.85)
+        d("heading_gain",1.2); d("k_center",5.0); d("k_side",4.0); d("slow_gain",4.0)
+        d("block_area_frac",0.015); d("reverse_area",0.16); d("lower_band",0.55)
+        d("avoid_lock_time",1.8); d("steer_smooth",0.35); d("speed_smooth",0.30)
+        d("region_window",6); d("max_ang_rate",1.8)
         d("stuck_window",3.0); d("stuck_dist",0.15); d("recovery_time",2.5); d("warmup_time",3.0)
         d("detour_threshold",3); d("detour_wp_dist",20.0); d("detour_time_limit",12.0)
         d("detour_reach_tol",2.5)
@@ -113,6 +113,8 @@ class Nav(Node):
         for cnt in contours:
             bx,by,bw,bh=cv2.boundingRect(cnt)
             if bw<=0 or bh<=0: continue
+            aspect_ratio = bh / float(bw)
+            if aspect_ratio > 3.0 or by < 0.08*h: continue  # skip tall rack posts / ceiling
             fill=cv2.contourArea(cnt)/float(bw*bh)
             if fill<0.5: continue                          # skip thin lane-line slivers
             af=(bw*bh)/ia; bf=(by+bh)/h; cx=bx+bw/2.0
@@ -143,25 +145,27 @@ class Nav(Node):
         # ---- Current navigation target: the real goal, or -- while
         # detouring after repeated stuck failures -- a temporary waypoint
         # inside the junction's left/right corridor. ----
+        dist=math.hypot(self.gx-x, self.gy-y)
         if self.nav_state=="DETOUR":
             tx,ty=self.detour_x,self.detour_y
+            dist_to_wp=math.hypot(tx-x,ty-y)
+            if dist_to_wp<self.detour_reach_tol or now>=self.detour_deadline:
+                self.nav_state="GOAL"
+                self.stuck_count=0; self.pos_hist=[]; self.avoid_dir=0.0
+                self.get_logger().info("Detour complete -> resuming original goal (%.1f,%.1f)"
+                                        %(self.gx,self.gy))
+                if dist<self.tol:
+                    self.cmd.publish(Twist()); self.reached=True
+                    self.get_logger().info("GOAL REACHED (%.2f m)."%dist); return
         else:
-            tx,ty=self.gx,self.gy
-        dx,dy=tx-x,ty-y; dist=math.hypot(dx,dy)
-
-        if self.nav_state=="GOAL" and dist<self.tol:
-            self.cmd.publish(Twist()); self.reached=True
-            self.get_logger().info("GOAL REACHED (%.2f m)."%dist); return
-
-        if self.nav_state=="DETOUR" and (dist<self.detour_reach_tol or now>=self.detour_deadline):
-            self.nav_state="GOAL"
-            self.stuck_count=0; self.pos_hist=[]; self.avoid_dir=0.0
-            self.get_logger().info("Detour complete -> resuming original goal (%.1f,%.1f)"
-                                    %(self.gx,self.gy))
-            dx,dy=self.gx-x,self.gy-y; dist=math.hypot(dx,dy)
             if dist<self.tol:
                 self.cmd.publish(Twist()); self.reached=True
                 self.get_logger().info("GOAL REACHED (%.2f m)."%dist); return
+            # Lookahead tracking along the aisle keeps the robot centered at y=gy:
+            lookahead = 7.0
+            tx = min(self.gx, x + lookahead) if self.gx >= x else max(self.gx, x - lookahead)
+            ty = self.gy
+        dx,dy=tx-x,ty-y
 
         # ---- Stuck detection & recovery: track real position over time.
         # If the robot hasn't actually moved despite trying to (wedged
@@ -242,33 +246,41 @@ class Nav(Node):
         # then hold that choice for lock_time seconds instead of recomputing
         # every tick -- this is what stops the steering from zigzagging when
         # L and R are nearly equal (e.g. passing between two obstacles).
-        if C>0.0 or L>0.0 or R>0.0:
-            if self.avoid_dir==0.0 or now>=self.lock_until:
-                self.avoid_dir = +1.0 if L<=R else -1.0
-                self.lock_until = now+self.lock_time
-        else:
-            self.avoid_dir=0.0
+        side_diff = R - L
+        if abs(side_diff) < 0.015:
+            side_diff = 0.0
 
-        if C>=self.rev:
-            c.linear.x=-self.vrev; c.angular.z=self.avoid_dir*self.amax; mode="REVERSE"
+        if C > 0.0:
+            if self.avoid_dir == 0.0 or now >= self.lock_until:
+                self.avoid_dir = +1.0 if L <= R else -1.0
+                self.lock_until = now + self.lock_time
         else:
-            herr=norm_angle(math.atan2(dy,dx)-yaw)
-            ang=self.kh*herr - self.ks*L + self.ks*R
-            if C>0.0:
-                ang+=self.avoid_dir*self.kc*C
-            ang=max(-self.amax,min(self.amax,ang))
+            if now >= self.lock_until:
+                self.avoid_dir = 0.0
+
+        if C >= self.rev:
+            c.linear.x = -self.vrev
+            c.angular.z = self.avoid_dir * (self.amax * 0.75)
+            mode = "REVERSE"
+        else:
+            herr = norm_angle(math.atan2(dy, dx) - yaw)
+            ang = self.kh * herr + self.ks * side_diff
+            if C > 0.0:
+                ang += self.avoid_dir * self.kc * C
+            ang = max(-self.amax, min(self.amax, ang))
             # low-pass filter steering, then hard-cap the rate of change so
             # no single tick can jerk the heading -- guaranteed smoothness
             # on top of the exponential filter, not just on average.
-            ang=self.smooth*ang+(1.0-self.smooth)*self.prev_ang
-            max_delta=self.max_ang_rate*0.05
-            ang=max(self.prev_ang-max_delta,min(self.prev_ang+max_delta,ang))
-            self.prev_ang=ang
-            v_target=max(self.vmin,min(self.vc,self.vc*(1.0-self.kslow*C)))
-            v=self.vsmooth*v_target+(1.0-self.vsmooth)*self.prev_v
-            self.prev_v=v
-            c.linear.x=v; c.angular.z=ang
-            mode="AVOID" if (C>0 or L>0 or R>0) else "FORWARD"
+            ang = self.smooth * ang + (1.0 - self.smooth) * self.prev_ang
+            max_delta = self.max_ang_rate * 0.05
+            ang = max(self.prev_ang - max_delta, min(self.prev_ang + max_delta, ang))
+            self.prev_ang = ang
+            v_target = max(self.vmin, min(self.vc, self.vc * (1.0 - self.kslow * C)))
+            v = self.vsmooth * v_target + (1.0 - self.vsmooth) * self.prev_v
+            self.prev_v = v
+            c.linear.x = v
+            c.angular.z = ang
+            mode = "AVOID" if (C > 0 or abs(side_diff) > 0) else "FORWARD"
         self.cmd.publish(c)
         if mode!="FORWARD":
             self.get_logger().info("[%s] %s L=%.3f C=%.3f R=%.3f v=%.2f w=%.2f"
