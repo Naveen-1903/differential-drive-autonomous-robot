@@ -8,4 +8,5 @@ venv/
 .venv/
 yolo_env/
 *.log
+*.pt
 *~

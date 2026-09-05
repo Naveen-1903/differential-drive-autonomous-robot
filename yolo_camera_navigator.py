@@ -38,10 +38,10 @@ class Nav(Node):
         d=self.declare_parameter
         d("goal_x",26.0); d("goal_y",0.0); d("goal_tolerance",1.2)
         d("cruise_speed",0.7); d("min_speed",0.30); d("reverse_speed",0.35); d("angular_max",0.85)
-        d("heading_gain",1.2); d("k_center",5.0); d("k_side",4.0); d("slow_gain",4.0)
-        d("block_area_frac",0.015); d("reverse_area",0.16); d("lower_band",0.55)
-        d("avoid_lock_time",1.8); d("steer_smooth",0.35); d("speed_smooth",0.30)
-        d("region_window",6); d("max_ang_rate",1.8)
+        d("heading_gain",1.2); d("k_center",6.5); d("k_side",4.0); d("slow_gain",4.0)
+        d("block_area_frac",0.012); d("reverse_area",0.14); d("lower_band",0.48)
+        d("avoid_lock_time",3.0); d("steer_smooth",0.35); d("speed_smooth",0.30)
+        d("region_window",6); d("max_ang_rate",1.8); d("lane_offset",2.2)
         d("stuck_window",3.0); d("stuck_dist",0.15); d("recovery_time",2.5); d("warmup_time",3.0)
         d("detour_threshold",3); d("detour_wp_dist",20.0); d("detour_time_limit",12.0)
         d("detour_reach_tol",2.5)
@@ -56,7 +56,7 @@ class Nav(Node):
         self.rev=g("reverse_area").value; self.lb=g("lower_band").value
         self.lock_time=g("avoid_lock_time").value; self.smooth=g("steer_smooth").value
         self.vsmooth=g("speed_smooth").value; self.region_window=g("region_window").value
-        self.max_ang_rate=g("max_ang_rate").value
+        self.max_ang_rate=g("max_ang_rate").value; self.lane_offset=g("lane_offset").value
         self.stuck_window=g("stuck_window").value; self.stuck_dist=g("stuck_dist").value
         self.recovery_time=g("recovery_time").value; self.warmup_time=g("warmup_time").value
         self.detour_threshold=g("detour_threshold").value; self.detour_wp_dist=g("detour_wp_dist").value
@@ -68,6 +68,7 @@ class Nav(Node):
         self.avoid_dir=0.0; self.lock_until=0.0; self.prev_ang=0.0; self.prev_v=0.0
         self.region_hist=[]
         self.pos_hist=[]; self.recover_until=0.0; self.recover_dir=1.0
+        self.backup_until=0.0; self.turn_clear=False
         self.stuck_count=0; self.last_recover_end=-999.0
         self.nav_state="GOAL"; self.detour_x=0.0; self.detour_y=0.0; self.detour_deadline=0.0
         self.warmup_until=time.time()+self.warmup_time
@@ -99,8 +100,11 @@ class Nav(Node):
             if y1 > CHASSIS_TOP*h: continue                # drop low sliver = own chassis
             af=((x2-x1)*(y2-y1))/ia; bf=y2/h; cx=(x1+x2)/2.0
             if af<self.ba or bf<self.lb: continue
-            k="left" if cx<t else ("center" if cx<2*t else "right")
-            reg[k]=max(reg[k],af)
+            center_overlap = max(0.0, min(x2, 2*t) - max(x1, t))
+            if center_overlap > 0.25*(x2-x1) or (cx >= t and cx < 2*t):
+                reg["center"] = max(reg["center"], af)
+            if x1 < t: reg["left"] = max(reg["left"], af)
+            if x2 > 2*t: reg["right"] = max(reg["right"], af)
 
         # ---- Colour-blob detector: catches bright obstacle crates that YOLO
         # (trained on COCO, not warehouse boxes) may not confidently label.
@@ -121,8 +125,12 @@ class Nav(Node):
             if by > CHASSIS_TOP*h: continue
             if af<self.ba or bf<self.lb: continue
             blob_boxes.append((bx,by,bw,bh))
-            k="left" if cx<t else ("center" if cx<2*t else "right")
-            reg[k]=max(reg[k],af)
+            bx2 = bx + bw
+            center_overlap = max(0.0, min(bx2, 2*t) - max(bx, t))
+            if center_overlap > 0.25*bw or (cx >= t and cx < 2*t):
+                reg["center"] = max(reg["center"], af)
+            if bx < t: reg["left"] = max(reg["left"], af)
+            if bx2 > 2*t: reg["right"] = max(reg["right"], af)
 
         self.region=reg
         try:
@@ -164,7 +172,7 @@ class Nav(Node):
             # Lookahead tracking along the aisle keeps the robot centered at y=gy:
             lookahead = 7.0
             tx = min(self.gx, x + lookahead) if self.gx >= x else max(self.gx, x - lookahead)
-            ty = self.gy
+            ty = self.gy + (self.avoid_dir * self.lane_offset if self.avoid_dir != 0.0 else 0.0)
         dx,dy=tx-x,ty-y
 
         # ---- Stuck detection & recovery: track real position over time.
@@ -175,17 +183,33 @@ class Nav(Node):
         while self.pos_hist and now-self.pos_hist[0][0] > self.stuck_window:
             self.pos_hist.pop(0)
 
+        if self.backup_until>0.0:
+            if now<self.backup_until:
+                c=Twist(); c.linear.x=-self.vrev; c.angular.z=0.0
+                self.cmd.publish(c)
+                self.get_logger().warn("TOO CLOSE -> REVERSING STRAIGHT (%.1fs remaining)"
+                                        %(self.backup_until-now), throttle_duration_sec=1.0)
+                return
+            else:
+                self.backup_until=0.0
+                self.pos_hist=[]
+                self.turn_clear=True
+                self.lock_until=now+5.0
+                self.get_logger().info("Backup complete -> turning in place to clear path")
+
         if self.recover_until>0.0:
             if now>=self.recover_until:
                 self.recover_until=0.0
                 self.last_recover_end=now
                 self.pos_hist=[]
-                self.avoid_dir=0.0
-                self.get_logger().info("Recovery complete -> resuming toward goal")
+                self.avoid_dir=self.recover_dir
+                self.lock_until=now+5.0
+                self.turn_clear=True
+                self.get_logger().info("Recovery complete -> turning in place to clear path")
             else:
-                c=Twist(); c.linear.x=-self.vrev; c.angular.z=self.recover_dir*self.amax
+                c=Twist(); c.linear.x=-self.vrev; c.angular.z=0.0
                 self.cmd.publish(c)
-                self.get_logger().warn("STUCK -> RECOVERING (reversing+turning)",
+                self.get_logger().warn("STUCK -> REVERSING STRAIGHT",
                                         throttle_duration_sec=1.0)
                 return
         elif now>=self.warmup_until and len(self.pos_hist)>=2 \
@@ -207,6 +231,8 @@ class Nav(Node):
                 rt=min(self.recovery_time*(1+0.4*min(self.stuck_count-1,4)),
                        self.recovery_time*3)
                 self.recover_until=now+rt
+                self.avoid_dir=self.recover_dir
+                self.lock_until=now+rt+5.0
 
                 # In-place reverse+turn has now failed this many times in a
                 # row -- stop retrying the same spot. Detour via the
@@ -250,23 +276,46 @@ class Nav(Node):
         if abs(side_diff) < 0.015:
             side_diff = 0.0
 
-        if C > 0.0:
+        if C > 0.01:
             if self.avoid_dir == 0.0 or now >= self.lock_until:
                 self.avoid_dir = +1.0 if L <= R else -1.0
+                self.lock_until = now + self.lock_time
+        elif abs(side_diff) > 0.03:
+            if self.avoid_dir == 0.0 or now >= self.lock_until:
+                self.avoid_dir = +1.0 if side_diff > 0 else -1.0
                 self.lock_until = now + self.lock_time
         else:
             if now >= self.lock_until:
                 self.avoid_dir = 0.0
 
+        if self.turn_clear:
+            if C > 0.02:
+                c.linear.x = 0.0
+                c.angular.z = (self.avoid_dir if self.avoid_dir != 0.0 else (1.0 if L <= R else -1.0)) * (self.amax * 0.85)
+                self.cmd.publish(c)
+                return
+            else:
+                self.turn_clear = False
+                self.get_logger().info("Center clear -> resuming bypass driving")
+
         if C >= self.rev:
+            self.backup_until = now + 2.0
+            if self.avoid_dir == 0.0:
+                self.avoid_dir = +1.0 if L <= R else -1.0
+            self.lock_until = now + 5.0
             c.linear.x = -self.vrev
-            c.angular.z = self.avoid_dir * (self.amax * 0.75)
-            mode = "REVERSE"
+            c.angular.z = 0.0
+            self.cmd.publish(c)
+            return
+        elif C > 0.04:
+            self.turn_clear = True
+            c.linear.x = 0.0
+            c.angular.z = (self.avoid_dir if self.avoid_dir != 0.0 else (1.0 if L <= R else -1.0)) * (self.amax * 0.85)
+            self.cmd.publish(c)
+            return
         else:
             herr = norm_angle(math.atan2(dy, dx) - yaw)
             ang = self.kh * herr + self.ks * side_diff
-            if C > 0.0:
-                ang += self.avoid_dir * self.kc * C
             ang = max(-self.amax, min(self.amax, ang))
             # low-pass filter steering, then hard-cap the rate of change so
             # no single tick can jerk the heading -- guaranteed smoothness
@@ -275,12 +324,15 @@ class Nav(Node):
             max_delta = self.max_ang_rate * 0.05
             ang = max(self.prev_ang - max_delta, min(self.prev_ang + max_delta, ang))
             self.prev_ang = ang
-            v_target = max(self.vmin, min(self.vc, self.vc * (1.0 - self.kslow * C)))
+            if C > 0.02:
+                v_target = 0.25
+            else:
+                v_target = max(self.vmin, self.vc)
             v = self.vsmooth * v_target + (1.0 - self.vsmooth) * self.prev_v
             self.prev_v = v
             c.linear.x = v
             c.angular.z = ang
-            mode = "AVOID" if (C > 0 or abs(side_diff) > 0) else "FORWARD"
+            mode = "AVOID" if (C > 0.01 or abs(side_diff) > 0 or self.avoid_dir != 0.0) else "FORWARD"
         self.cmd.publish(c)
         if mode!="FORWARD":
             self.get_logger().info("[%s] %s L=%.3f C=%.3f R=%.3f v=%.2f w=%.2f"
