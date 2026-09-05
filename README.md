@@ -4,6 +4,14 @@ An advanced ROS 2 (Humble) simulation of an autonomous differential drive robot 
 
 ---
 
+## 🎬 Simulation Demonstration
+
+[![Autonomous Simulation Demo](media/simulation_demo_thumbnail.png)](media/simulation_demo.webm)
+
+> **Watch the full run:** Click the preview above or view [`media/simulation_demo.webm`](media/simulation_demo.webm) to watch the autonomous robot navigate the photorealistic warehouse with live YOLOv8 object detection, corridor centering, and obstacle avoidance.
+
+---
+
 ## 🌟 Key Features
 
 - **Photorealistic Industrial Warehouse Environment**:
