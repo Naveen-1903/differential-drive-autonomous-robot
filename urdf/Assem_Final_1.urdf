@@ -1,0 +1,300 @@
+<?xml version="1.0"?>
+<robot name="Assem_Final_1">
+
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-0.006287 -0.00015551 0.12867" rpy="0 0 0" />
+      <mass value="40.0" />
+      <inertia ixx="1.63" ixy="-3.4013E-07" ixz="6.8447E-05"
+               iyy="4.54" iyz="1.5993E-06" izz="6.08" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/base_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.49804 0.49804 0.49804 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.15" rpy="0 0 0" />
+      <geometry>
+        <box size="1.4 0.7 0.22" />
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ═══════════════════════════════════════════
+       FRONT LEFT — CASTER WHEEL (free spinning)
+       ═══════════════════════════════════════════ -->
+  <link name="front_left_wheel_Link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="5.0" />
+      <inertia ixx="0.20" ixy="0" ixz="0"
+               iyy="0.33" iyz="0" izz="0.20" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/front_left_wheel_Link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.96863 0.96863 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5707963 0 0" />
+      <geometry>
+        <cylinder radius="0.37" length="0.24" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="front_left_wheel_joint" type="continuous">
+    <origin xyz="0.62 0.672 0.1315" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="front_left_wheel_Link" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0.01" friction="0.0" />
+  </joint>
+
+  <!-- ═══════════════════════════════════════════
+       FRONT RIGHT — CASTER WHEEL (free spinning)
+       ═══════════════════════════════════════════ -->
+  <link name="front_right_wheel_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="5.0" />
+      <inertia ixx="0.20" ixy="0" ixz="0"
+               iyy="0.33" iyz="0" izz="0.20" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/front_right_wheel_link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.96863 0.96863 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5707963 0 0" />
+      <geometry>
+        <cylinder radius="0.37" length="0.24" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="front_right_wheel_joint" type="continuous">
+    <origin xyz="0.62 -0.672 0.1315" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="front_right_wheel_link" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0.01" friction="0.0" />
+  </joint>
+
+  <!-- ═══════════════════════════════════════════
+       REAR LEFT — DRIVE WHEEL (controlled)
+       ═══════════════════════════════════════════ -->
+  <link name="rear_left_wheel_Link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="5.0" />
+      <inertia ixx="0.20" ixy="0" ixz="0"
+               iyy="0.33" iyz="0" izz="0.20" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/rear_left_wheel_Link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.96863 0.96863 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5707963 0 0" />
+      <geometry>
+        <cylinder radius="0.37" length="0.24" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_left_wheel_joint" type="continuous">
+    <origin xyz="-0.62 0.672 0.1315" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rear_left_wheel_Link" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0.2" friction="0.05" />
+  </joint>
+
+  <!-- ═══════════════════════════════════════════
+       REAR RIGHT — DRIVE WHEEL (controlled)
+       ═══════════════════════════════════════════ -->
+  <link name="rear_right_wheel_Link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="5.0" />
+      <inertia ixx="0.20" ixy="0" ixz="0"
+               iyy="0.33" iyz="0" izz="0.20" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/rear_right_wheel_Link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="0.96863 0.96863 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5707963 0 0" />
+      <geometry>
+        <cylinder radius="0.37" length="0.24" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="rear_right_wheel_joint" type="continuous">
+    <origin xyz="-0.62 -0.672 0.1315" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="rear_right_wheel_Link" />
+    <axis xyz="0 1 0" />
+    <dynamics damping="0.2" friction="0.05" />
+  </joint>
+
+  <!-- ═══════════════════════════════════════════
+       CAMERA
+       ═══════════════════════════════════════════ -->
+  <link name="camera_Link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.1" />
+      <inertia ixx="0.001" ixy="0" ixz="0"
+               iyy="0.001" iyz="0" izz="0.001" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/camera_Link.STL" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="/home/naveen/Downloads/Assem_Final_1/meshes/camera_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <origin xyz="0.65764 0 0.4" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="camera_Link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <!-- ═══════════════════════════════════════════
+       GAZEBO — FRONT CASTER WHEELS
+       ═══════════════════════════════════════════ -->
+  <gazebo reference="front_left_wheel_Link">
+    <mu1>0.01</mu1>
+    <mu2>0.01</mu2>
+    <kp>1000000.0</kp>
+    <kd>50.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>0.5</maxVel>
+    <self_collide>false</self_collide>
+  </gazebo>
+
+  <gazebo reference="front_right_wheel_link">
+    <mu1>0.01</mu1>
+    <mu2>0.01</mu2>
+    <kp>1000000.0</kp>
+    <kd>50.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>0.5</maxVel>
+    <self_collide>false</self_collide>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════
+       GAZEBO — REAR DRIVE WHEELS
+       ═══════════════════════════════════════════ -->
+  <gazebo reference="rear_left_wheel_Link">
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1000000.0</kp>
+    <kd>50.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>0.5</maxVel>
+    <self_collide>false</self_collide>
+  </gazebo>
+
+  <gazebo reference="rear_right_wheel_Link">
+    <mu1>0.8</mu1>
+    <mu2>0.8</mu2>
+    <kp>1000000.0</kp>
+    <kd>50.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>0.5</maxVel>
+    <self_collide>false</self_collide>
+  </gazebo>
+
+  <gazebo reference="base_link">
+    <self_collide>false</self_collide>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════
+       DIFFERENTIAL DRIVE PLUGIN
+       ═══════════════════════════════════════════ -->
+  <gazebo>
+    <plugin name="diff_drive_controller" filename="libgazebo_ros_diff_drive.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <update_rate>50</update_rate>
+      <left_joint>rear_left_wheel_joint</left_joint>
+      <right_joint>rear_right_wheel_joint</right_joint>
+      <wheel_separation>1.344</wheel_separation>
+      <wheel_diameter>0.74</wheel_diameter>
+      <max_wheel_torque>600</max_wheel_torque>
+      <max_wheel_acceleration>6.0</max_wheel_acceleration>
+      <command_topic>cmd_vel</command_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>true</publish_wheel_tf>
+    </plugin>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════
+       CAMERA SENSOR
+       ═══════════════════════════════════════════ -->
+  <gazebo reference="camera_Link">
+    <sensor type="camera" name="robot_camera">
+      <update_rate>30.0</update_rate>
+      <camera name="head">
+        <horizontal_fov>1.3962634</horizontal_fov>
+        <image>
+          <width>800</width>
+          <height>800</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>300</far>
+        </clip>
+      </camera>
+      <plugin name="camera_controller" filename="libgazebo_ros_camera.so">
+        <frame_name>camera_Link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+</robot>
