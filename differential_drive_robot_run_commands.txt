@@ -1,0 +1,39 @@
+Differential Drive Autonomous Robot with Camera-Based Obstacle Detection
+==========================================================================
+
+① Kill everything and start clean
+---------------------------------
+
+pkill -9 gzserver; pkill -9 gzclient; pkill -9 gazebo
+pkill -9 -f yolo_camera_navigator.py
+pkill -9 -f rqt_image_view
+sleep 3
+
+
+② Terminal 1 — Gazebo + warehouse
+----------------------------------
+
+source /opt/ros/humble/setup.bash
+ros2 launch gazebo_ros gazebo.launch.py world:=/home/naveen/Downloads/Assem_Final_1/warehouse.world
+
+
+③ Terminal 2 — Spawn robot far on the LEFT
+------------------------------------------
+
+source /opt/ros/humble/setup.bash
+cd ~/Downloads/Assem_Final_1/urdf
+ros2 run gazebo_ros spawn_entity.py -entity autonomous_robot -file Assem_Final_1.urdf -x -38 -y 0 -z 0.6
+
+
+④ Terminal 3 — Navigate to the goal
+------------------------------------
+
+source /opt/ros/humble/setup.bash
+python3 ~/Downloads/Assem_Final_1/yolo_camera_navigator.py --ros-args -p goal_x:=40.0 -p goal_y:=0.0 -p use_sim_time:=true
+
+
+⑤ Terminal 4 — YOLO detection view
+-----------------------------------
+
+source /opt/ros/humble/setup.bash
+ros2 run rqt_image_view rqt_image_view /yolo_debug/image
