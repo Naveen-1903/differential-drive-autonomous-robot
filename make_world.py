@@ -1,252 +1,337 @@
 #!/usr/bin/env python3
-"""Rich industrial warehouse for Gazebo Classic 11. Writes warehouse.world
-next to this script. Driving aisle (|y|<=4.5) stays clear; the only in-path
-obstacles are PEOPLE (YOLO-detectable). Everything else is side scenery so the
-camera-only robot never collides with things it cannot see."""
+"""
+Photorealistic Industrial Warehouse World Generator for Gazebo Classic 11.
+Combines:
+  - High-resolution industrial concrete floor with expansion joints and gloss.
+  - OSHA-compliant yellow & black 45-degree hazard stripe aisle boundaries.
+  - AWS RoboMaker Small Warehouse multi-tier industrial pallet racks (PBR textures).
+  - OSRF Euro-pallets, textured cardboard shipping boxes, utility carts, barrels.
+  - 3D warehouse workers (person_standing).
+  - Industrial corrugated metal walls, roll-up overhead dock doors, safety bollards.
+  - Overhead steel roof trusses, high-bay LED daylight illumination, and AGV docking pad.
+"""
 import os
 
-FX, FY = 84.0, 36.0
-HX, HY = FX/2.0, FY/2.0
-WALL_H, WALL_T = 5.0, 0.3
+W_LEN = 88.0    # Warehouse length along X (-44 to +44)
+W_WID = 30.0    # Warehouse width along Y (-15 to +15)
+W_HGT = 6.0     # Wall height
+WALL_T = 0.35   # Wall thickness
 
-def smat(name):
-    return ('<material><script><uri>file://media/materials/scripts/gazebo.material</uri>'
-            '<name>%s</name></script></material>' % name)
-def cmat(rgba):
-    r,g,b,a = rgba.split()
-    return ('<material><ambient>%s %s %s %s</ambient><diffuse>%s %s %s %s</diffuse>'
-            '<specular>0.1 0.1 0.1 1</specular></material>' % (r,g,b,a,r,g,b,a))
+def mat_custom(name):
+    return f"""<material>
+          <script>
+            <uri>model://warehouse_assets/materials/scripts</uri>
+            <uri>model://warehouse_assets/materials/textures</uri>
+            <name>{name}</name>
+          </script>
+        </material>"""
 
-def box(name,x,y,z,sx,sy,sz,mat,col=True):
-    c = ('<collision name="c"><geometry><box><size>%s %s %s</size></box></geometry></collision>'%(sx,sy,sz)) if col else ''
-    return ('<model name="%s"><static>true</static><pose>%s %s %s 0 0 0</pose><link name="link">%s'
-            '<visual name="v"><geometry><box><size>%s %s %s</size></box></geometry>%s</visual></link></model>'
-            %(name,x,y,z,c,sx,sy,sz,mat))
+def mat_gazebo(name):
+    return f"""<material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>{name}</name>
+          </script>
+        </material>"""
 
-def cyl(name,x,y,z,rad,h,mat):
-    return ('<model name="%s"><static>true</static><pose>%s %s %s 0 0 0</pose><link name="link">'
-            '<collision name="c"><geometry><cylinder><radius>%s</radius><length>%s</length></cylinder></geometry></collision>'
-            '<visual name="v"><geometry><cylinder><radius>%s</radius><length>%s</length></cylinder></geometry>%s</visual>'
-            '</link></model>'%(name,x,y,z,rad,h,rad,h,mat))
+def mat_color(r, g, b, a=1.0, spec=0.2):
+    return f"""<material>
+          <ambient>{r} {g} {b} {a}</ambient>
+          <diffuse>{r} {g} {b} {a}</diffuse>
+          <specular>{spec} {spec} {spec} 1</specular>
+        </material>"""
 
-def rack(name,cx,cy,length=4.0,depth=2.0,height=3.2,yaw=0.0):
-    post=0.12; frame=cmat("0.10 0.25 0.75 1"); shelf=cmat("0.55 0.55 0.58 1"); pal=cmat("0.55 0.40 0.25 1")
-    hx,hy=length/2.0,depth/2.0; L=[]
-    for sx_ in (-hx+post,hx-post):
-        for sy_ in (-hy+post,hy-post):
-            L.append('<visual name="p%s_%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>%s %s %s</size></box></geometry>%s</visual>'
-                     '<collision name="pc%s_%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>%s %s %s</size></box></geometry></collision>'
-                     %(sx_,sy_,sx_,sy_,height/2,post,post,height,frame,sx_,sy_,sx_,sy_,height/2,post,post,height))
-    for z in (0.6,1.5,2.4):
-        L.append('<visual name="s%s"><pose>0 0 %s 0 0 0</pose><geometry><box><size>%s %s 0.06</size></box></geometry>%s</visual>'
-                 '<collision name="sc%s"><pose>0 0 %s 0 0 0</pose><geometry><box><size>%s %s 0.06</size></box></geometry></collision>'
-                 %(z,z,length,depth,shelf,z,z,length,depth))
-    for i,(bx,z) in enumerate([(-1.1,0.95),(1.1,0.95),(0.0,1.85),(-1.0,2.75),(1.0,2.75)]):
-        L.append('<visual name="b%s"><pose>%s 0 %s 0 0 0</pose><geometry><box><size>1.0 1.2 0.7</size></box></geometry>%s</visual>'%(i,bx,z,pal))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 %s</pose><link name="link">%s</link></model>'%(name,cx,cy,yaw,"".join(L))
+def box_model(name, x, y, z, sx, sy, sz, mat_xml, col=True):
+    col_xml = f"""<collision name="c">
+        <geometry><box><size>{sx} {sy} {sz}</size></box></geometry>
+      </collision>""" if col else ""
+    return f"""<model name="{name}">
+    <static>true</static>
+    <pose>{x} {y} {z} 0 0 0</pose>
+    <link name="link">
+      {col_xml}
+      <visual name="v">
+        <geometry><box><size>{sx} {sy} {sz}</size></box></geometry>
+        {mat_xml}
+      </visual>
+    </link>
+  </model>"""
 
-def pallet(name,x,y):
-    woodmat=cmat("0.50 0.36 0.22 1"); cb=cmat("0.62 0.47 0.30 1"); L=[]
-    L.append('<visual name="pl"><pose>0 0 0.08 0 0 0</pose><geometry><box><size>1.2 1.0 0.16</size></box></geometry>%s</visual>'
-             '<collision name="plc"><pose>0 0 0.08 0 0 0</pose><geometry><box><size>1.2 1.0 0.16</size></box></geometry></collision>'%woodmat)
-    for i,(bx,by,bz) in enumerate([(-0.25,0,0.55),(0.30,0,0.55),(0,0,1.15)]):
-        L.append('<visual name="c%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>0.55 0.8 0.55</size></box></geometry>%s</visual>'%(i,bx,by,bz,cb))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 0</pose><link name="link">%s</link></model>'%(name,x,y,"".join(L))
+def bollard(name, x, y):
+    # Safety yellow bollard with black top cap
+    yellow_mat = mat_color(0.95, 0.75, 0.05, spec=0.4)
+    black_mat = mat_color(0.12, 0.12, 0.12, spec=0.2)
+    return f"""<model name="{name}">
+    <static>true</static>
+    <pose>{x} {y} 0 0 0 0</pose>
+    <link name="link">
+      <collision name="c">
+        <pose>0 0 0.5 0 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>1.0</length></cylinder></geometry>
+      </collision>
+      <visual name="post">
+        <pose>0 0 0.48 0 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.96</length></cylinder></geometry>
+        {yellow_mat}
+      </visual>
+      <visual name="cap">
+        <pose>0 0 0.98 0 0 0</pose>
+        <geometry><cylinder><radius>0.125</radius><length>0.06</length></cylinder></geometry>
+        {black_mat}
+      </visual>
+    </link>
+  </model>"""
 
-def forklift(name,x,y,yaw=0.0):
-    body=cmat("0.95 0.55 0.05 1"); blk=cmat("0.1 0.1 0.1 1"); mast=cmat("0.3 0.3 0.32 1"); L=[]
-    L.append('<visual name="bd"><pose>0 0 0.5 0 0 0</pose><geometry><box><size>1.6 1.0 0.8</size></box></geometry>%s</visual>'
-             '<collision name="bdc"><pose>0 0 0.5 0 0 0</pose><geometry><box><size>1.6 1.0 0.8</size></box></geometry></collision>'%body)
-    L.append('<visual name="cab"><pose>-0.2 0 1.3 0 0 0</pose><geometry><box><size>0.8 0.9 0.8</size></box></geometry>%s</visual>'%body)
-    L.append('<visual name="mast"><pose>0.85 0 1.0 0 0 0</pose><geometry><box><size>0.12 0.9 2.0</size></box></geometry>%s</visual>'%mast)
-    L.append('<visual name="forkL"><pose>1.2 -0.3 0.1 0 0 0</pose><geometry><box><size>0.9 0.12 0.08</size></box></geometry>%s</visual>'%blk)
-    L.append('<visual name="forkR"><pose>1.2 0.3 0.1 0 0 0</pose><geometry><box><size>0.9 0.12 0.08</size></box></geometry>%s</visual>'%blk)
-    for i,(wx,wy) in enumerate([(0.6,0.55),(0.6,-0.55),(-0.6,0.55),(-0.6,-0.55)]):
-        L.append('<visual name="w%s"><pose>%s %s 0.25 1.5708 0 0</pose><geometry><cylinder><radius>0.25</radius><length>0.2</length></cylinder></geometry>%s</visual>'%(i,wx,wy,blk))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 %s</pose><link name="link">%s</link></model>'%(name,x,y,yaw,"".join(L))
+def roof_truss(name, x):
+    # Industrial overhead steel cross-truss
+    steel_mat = mat_color(0.35, 0.38, 0.42, spec=0.5)
+    return f"""<model name="{name}">
+    <static>true</static>
+    <pose>{x} 0 5.4 0 0 0</pose>
+    <link name="link">
+      <visual name="top_chord">
+        <pose>0 0 0.4 0 0 0</pose>
+        <geometry><box><size>0.25 {W_WID} 0.15</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="bottom_chord">
+        <pose>0 0 -0.4 0 0 0</pose>
+        <geometry><box><size>0.25 {W_WID} 0.15</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="strut_c">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry><box><size>0.15 0.15 0.8</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="strut_l1">
+        <pose>0 6.0 0 0 0 0</pose>
+        <geometry><box><size>0.15 0.15 0.8</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="strut_r1">
+        <pose>0 -6.0 0 0 0 0</pose>
+        <geometry><box><size>0.15 0.15 0.8</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="strut_l2">
+        <pose>0 12.0 0 0 0 0</pose>
+        <geometry><box><size>0.15 0.15 0.8</size></box></geometry>
+        {steel_mat}
+      </visual>
+      <visual name="strut_r2">
+        <pose>0 -12.0 0 0 0 0</pose>
+        <geometry><box><size>0.15 0.15 0.8</size></box></geometry>
+        {steel_mat}
+      </visual>
+    </link>
+  </model>"""
 
-def crate_stack(name,x,y):
-    w=cmat("0.45 0.32 0.20 1"); L=[]
-    for i,(bx,by,bz) in enumerate([(0,0,0.5),(0,0,1.5),(0.5,0.4,2.4)]):
-        L.append('<visual name="cr%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>1.0 1.0 1.0</size></box></geometry>%s</visual>'
-                 '<collision name="crc%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>1.0 1.0 1.0</size></box></geometry></collision>'
-                 %(i,bx,by,bz,w,i,bx,by,bz))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 0</pose><link name="link">%s</link></model>'%(name,x,y,"".join(L))
+def include_model(name, uri, x, y, z=0.0, yaw=0.0):
+    return f"""<include>
+    <name>{name}</name>
+    <uri>{uri}</uri>
+    <pose>{x} {y} {z} 0 0 {yaw}</pose>
+  </include>"""
 
-def obstacle(name,x,y,color):
-    # bright stacked crates placed IN the lane as object obstacles (YOLO-detectable)
-    m=cmat(color); L=[]
-    for i,(bz,sz) in enumerate([(0.45,0.9),(1.15,0.5)]):
-        L.append('<visual name="o%s"><pose>0 0 %s 0 0 0</pose><geometry><box><size>0.9 0.9 %s</size></box></geometry>%s</visual>'
-                 '<collision name="oc%s"><pose>0 0 %s 0 0 0</pose><geometry><box><size>0.9 0.9 %s</size></box></geometry></collision>'
-                 %(i,bz,sz,m,i,bz,sz))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 0</pose><link name="link">%s</link></model>'%(name,x,y,"".join(L))
+elements = []
 
-def person(name,x,y,yaw=0.0):
-    return '<include><name>%s</name><uri>model://person_standing</uri><pose>%s %s 0 0 0 %s</pose></include>'%(name,x,y,yaw)
+# ==========================================
+# 1. FLOOR & OSHA SAFETY BOUNDARY MARKINGS
+# ==========================================
+# High-resolution polished concrete warehouse floor
+elements.append(box_model("floor", 0, 0, -0.05, W_LEN, W_WID, 0.1, mat_custom("Warehouse/ConcreteFloor"), col=False))
 
-def pallet_jack(name,x,y,yaw=0.0):
-    steel=cmat("0.85 0.35 0.05 1"); blk=cmat("0.08 0.08 0.08 1"); L=[]
-    L.append('<visual name="body"><pose>0 0 0.12 0 0 0</pose><geometry><box><size>1.4 0.55 0.15</size></box></geometry>%s</visual>'
-              '<collision name="bc"><pose>0 0 0.12 0 0 0</pose><geometry><box><size>1.4 0.55 0.15</size></box></geometry></collision>'%steel)
-    L.append('<visual name="handle"><pose>-0.75 0 0.55 0 0.5 0</pose><geometry><box><size>0.06 0.5 0.9</size></box></geometry>%s</visual>'%blk)
-    for i,(wx,wy) in enumerate([(0.55,0.2),(0.55,-0.2)]):
-        L.append('<visual name="w%s"><pose>%s %s 0.06 1.5708 0 0</pose><geometry><cylinder><radius>0.06</radius><length>0.08</length></cylinder></geometry>%s</visual>'%(i,wx,wy,blk))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 %s</pose><link name="link">%s</link></model>'%(name,x,y,yaw,"".join(L))
+# Yellow/Black hazard stripe boundaries along the main AGV aisle (|y| = 2.5)
+elements.append(box_model("hazard_line_left", 0, 2.5, 0.015, 78.0, 0.22, 0.02, mat_custom("Warehouse/HazardStripes"), col=False))
+elements.append(box_model("hazard_line_right", 0, -2.5, 0.015, 78.0, 0.22, 0.02, mat_custom("Warehouse/HazardStripes"), col=False))
 
-def cone(name,x,y):
-    return cyl(name,x,y,0.25,0.18,0.5,cmat("0.95 0.35 0.05 1"))
+# Pedestrian zebra crosswalk at junction (x = 0)
+for yy in [-2.0, -1.2, -0.4, 0.4, 1.2, 2.0]:
+    elements.append(box_model(f"crosswalk_{yy:.1f}".replace("-","m").replace(".","_"), 0, yy, 0.018, 1.2, 0.4, 0.02, mat_color(0.95, 0.95, 0.95), col=False))
 
-def box_pile(name,x,y):
-    w=cmat("0.60 0.46 0.30 1"); L=[]
-    for i,(bx,by,bz,s) in enumerate([(0,0,0.25,0.5),(0.2,0.15,0.65,0.35),(-0.15,-0.1,0.6,0.3)]):
-        L.append('<visual name="b%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>%s %s %s</size></box></geometry>%s</visual>'
-                 '<collision name="bc%s"><pose>%s %s %s 0 0 0</pose><geometry><box><size>%s %s %s</size></box></geometry></collision>'
-                 %(i,bx,by,bz,s,s,s,w,i,bx,by,bz,s,s,s))
-    return '<model name="%s"><static>true</static><pose>%s %s 0 0 0 0</pose><link name="link">%s</link></model>'%(name,x,y,"".join(L))
+# Staging bay floor boundary lines (yellow paint)
+yellow_line_mat = mat_color(0.95, 0.78, 0.05)
+for sx in [-32, -24, -16, 8, 16, 24, 32]:
+    elements.append(box_model(f"staging_line_L_{sx}".replace("-","m"), sx, 3.8, 0.012, 0.15, 2.4, 0.02, yellow_line_mat, col=False))
+    elements.append(box_model(f"staging_line_R_{sx}".replace("-","m"), sx, -3.8, 0.012, 0.15, 2.4, 0.02, yellow_line_mat, col=False))
 
-def cross_aisle_sign(name,x,y):
-    return '<model name="%s"><static>true</static><pose>%s %s 1.8 0 0 0</pose><link name="link">' \
-           '<visual name="v"><geometry><box><size>0.06 1.4 0.5</size></box></geometry>%s</visual></link></model>' \
-           % (name,x,y,cmat("0.05 0.55 0.15 1"))
+# ==========================================
+# 2. PERIMETER WALLS & LOADING DOCKS
+# ==========================================
+HX = W_LEN / 2.0
+HY = W_WID / 2.0
+wall_mat = mat_custom("Warehouse/CorrugatedWall")
 
-p=[]
-# Floor + walls
-p.append(box("floor",0,0,-0.05,FX,FY,0.1,smat("Gazebo/Grey"),col=False))
-wm=smat("Gazebo/Grey")
-p.append(box("wall_n",HX,0,WALL_H/2,WALL_T,FY,WALL_H,wm))
-p.append(box("wall_s",-HX,0,WALL_H/2,WALL_T,FY,WALL_H,wm))
-GAP = 6.0
-BAY_DEPTH = 26.0
-seg_len = (FX - GAP)/2.0
-seg_off = GAP/2.0 + seg_len/2.0
-p.append(box("wall_e_a", -seg_off, HY, WALL_H/2, seg_len, WALL_T, WALL_H, wm))
-p.append(box("wall_e_b",  seg_off, HY, WALL_H/2, seg_len, WALL_T, WALL_H, wm))
-p.append(box("wall_w_a", -seg_off,-HY, WALL_H/2, seg_len, WALL_T, WALL_H, wm))
-p.append(box("wall_w_b",  seg_off,-HY, WALL_H/2, seg_len, WALL_T, WALL_H, wm))
-# Side bays (real rooms) through the wall gaps -> actual LEFT / RIGHT paths
-p.append(box("bay_e_floor", 0, HY+BAY_DEPTH/2, -0.05, GAP, BAY_DEPTH, 0.1, smat("Gazebo/Grey"), col=False))
-p.append(box("bay_e_far",   0, HY+BAY_DEPTH,   WALL_H/2, GAP, WALL_T, WALL_H, wm))
-p.append(box("bay_e_l",    -GAP/2, HY+BAY_DEPTH/2, WALL_H/2, WALL_T, BAY_DEPTH, WALL_H, wm))
-p.append(box("bay_e_r",     GAP/2, HY+BAY_DEPTH/2, WALL_H/2, WALL_T, BAY_DEPTH, WALL_H, wm))
-p.append(box("bay_w_floor", 0,-(HY+BAY_DEPTH/2), -0.05, GAP, BAY_DEPTH, 0.1, smat("Gazebo/Grey"), col=False))
-p.append(box("bay_w_far",   0,-(HY+BAY_DEPTH),   WALL_H/2, GAP, WALL_T, WALL_H, wm))
-p.append(box("bay_w_l",    -GAP/2,-(HY+BAY_DEPTH/2), WALL_H/2, WALL_T, BAY_DEPTH, WALL_H, wm))
-p.append(box("bay_w_r",     GAP/2,-(HY+BAY_DEPTH/2), WALL_H/2, WALL_T, BAY_DEPTH, WALL_H, wm))
+# Long East and West walls
+elements.append(box_model("wall_north_side", 0, HY, W_HGT/2.0, W_LEN, WALL_T, W_HGT, wall_mat))
+elements.append(box_model("wall_south_side", 0, -HY, W_HGT/2.0, W_LEN, WALL_T, W_HGT, wall_mat))
 
-# ---- Outfit both side corridors like real aisles (flanking racks rotated
-# 90 deg, inset from the corridor walls; three modules per side per bay) ----
-for i,off in enumerate((5.0,13.0,21.0)):
-    p.append(rack("bayL_rackL%d"%i, -1.9,  HY+off, depth=1.4, yaw=1.5708))
-    p.append(rack("bayL_rackR%d"%i,  1.9,  HY+off, depth=1.4, yaw=1.5708))
-    p.append(rack("bayR_rackL%d"%i, -1.9, -(HY+off), depth=1.4, yaw=1.5708))
-    p.append(rack("bayR_rackR%d"%i,  1.9, -(HY+off), depth=1.4, yaw=1.5708))
-# End-zone floor markers -> each side path clearly leads somewhere distinct
-p.append(box("zoneB_pad", 0,  HY+BAY_DEPTH-2.0, 0.015, GAP-1.0, 3.0, 0.02, cmat("0.10 0.35 0.75 1"), col=False))
-p.append(box("zoneC_pad", 0,-(HY+BAY_DEPTH-2.0), 0.015, GAP-1.0, 3.0, 0.02, cmat("0.85 0.35 0.05 1"), col=False))
-# Extra lighting so both corridors are lit along their full length
-p.append(f'<light name="bayL_light" type="point"><pose>0 {HY+BAY_DEPTH/2} 7 0 0 0</pose>'
-         '<diffuse>0.7 0.7 0.7 1</diffuse><attenuation><range>40</range><linear>0.04</linear>'
-         '<constant>0.3</constant></attenuation><cast_shadows>false</cast_shadows></light>')
-p.append(f'<light name="bayR_light" type="point"><pose>0 -{HY+BAY_DEPTH/2} 7 0 0 0</pose>'
-         '<diffuse>0.7 0.7 0.7 1</diffuse><attenuation><range>40</range><linear>0.04</linear>'
-         '<constant>0.3</constant></attenuation><cast_shadows>false</cast_shadows></light>')
-# Loading-dock doors on the north (goal-end) wall
-for i,yy in enumerate([-9,-3,3,9]):
-    p.append(box("dock%d"%i,HX-0.2,yy,1.6,0.1,4.0,3.2,cmat("0.20 0.22 0.28 1"),col=False))
-# Inner racks y=+/-6 and outer racks y=+/-10
-for i,sx in enumerate([-28,-20,-12,-4,4,12,20,28]):
-    p.append(rack("rackLi%d"%i,sx,7.5)); p.append(rack("rackRi%d"%i,sx,-7.5))
-for i,sx in enumerate([-28,-20,-12,-4,4,12,20,28]):
-    p.append(rack("rackLo%d"%i,sx,11.5)); p.append(rack("rackRo%d"%i,sx,-11.5))
-# Pallets lined along the aisle edge (still outside the driving corridor)
-for i,sx in enumerate([-26,-18,-10,-2,6,14,22]):
-    p.append(pallet("palL%d"%i,sx,6.0)); p.append(pallet("palR%d"%i,sx,-6.0))
-# Barrels between rack rows
-bcols=["0.85 0.15 0.1 1","0.1 0.35 0.8 1","0.2 0.6 0.2 1"]
-for i,sx in enumerate([-17,-9,-1,7,15]):
-    p.append(cyl("barL%d"%i,sx,9.3,0.45,0.45,0.9,cmat(bcols[i%3])))
-    p.append(cyl("barR%d"%i,sx,-9.3,0.45,0.45,0.9,cmat(bcols[(i+1)%3])))
-# Forklifts parked off to the side
-p.append(forklift("fork1",-22,9.5,0.3))
-p.append(forklift("fork2", 18,-9.5,3.0))
-# Crate stacks in the corners
-p.append(crate_stack("crate1",-39,14)); p.append(crate_stack("crate2",39,14))
-p.append(crate_stack("crate3",-39,-14)); p.append(crate_stack("crate4",39,-14))
-# Ceiling light fixtures (visual only)
-for i,sx in enumerate([-28,-20,-12,-4,4,12,20,28]):
-    p.append(box("fix%d"%i,sx,0,4.7,1.0,0.3,0.15,cmat("0.95 0.95 0.8 1"),col=False))
-# Hazard lane lines down the aisle
-yl=cmat("0.95 0.80 0.05 1")
-p.append(box("laneL",0,2.0,0.02,62,0.16,0.02,yl,col=False))
-p.append(box("laneR",0,-2.0,0.02,62,0.16,0.02,yl,col=False))
-# Wall signage panels
-p.append(box("signA",-HX+0.2,8,2.5,0.05,3,1.2,cmat("0.9 0.2 0.2 1"),col=False))
-p.append(box("signB",-HX+0.2,-8,2.5,0.05,3,1.2,cmat("0.2 0.5 0.9 1"),col=False))
+# South wall (spawn end x = -44)
+elements.append(box_model("wall_spawn_end", -HX, 0, W_HGT/2.0, WALL_T, W_WID, W_HGT, wall_mat))
+# Safety signs on spawn-end wall
+elements.append(box_model("safety_sign_1", -HX + 0.22, 3.0, 2.4, 0.04, 2.0, 1.0, mat_custom("Warehouse/SafetySign"), col=False))
+elements.append(box_model("safety_sign_2", -HX + 0.22, -3.0, 2.4, 0.04, 2.0, 1.0, mat_custom("Warehouse/SafetySign"), col=False))
 
-# ---- Busy-warehouse clutter: all placed at |y|>=5, well clear of the
-# robot's tested main-path obstacle sequence (main path stays |y|<=3). ----
-for i,(px,py,yaw) in enumerate([(-22,9.6,0.4),(-6,-9.6,1.0),(10,9.6,-0.3),(26,-9.6,0.8)]):
-    p.append(pallet_jack("jack%d"%i, px, py, yaw))
-for i,(cx,cy) in enumerate([(-14,-6.0),(-14,6.0),(14,-6.0),(14,6.0),(30,6.0)]):
-    p.append(cone("cone%d"%i, cx, cy))
-for i,(bx,by) in enumerate([(-24,13.5),(-8,13.5),(8,-13.5),(24,-13.5),(32,13.5)]):
-    p.append(box_pile("pile%d"%i, bx, by))
-# Extra background workers, off to the side (decorative only, not in the
-# tested obstacle sequence -> won't affect navigation testing)
-p.append(person("worker_1", -18.0,  9.5, 1.2))
-p.append(person("worker_2",   2.0, -9.5, -1.2))
-p.append(person("worker_3",  18.0,  9.5, 0.6))
-p.append(person("worker_4",  -2.0, 13.5, 2.0))
-# Cross-aisle markers: the racks already leave ~4m gaps every 8m (real
-# warehouses use these as fire/access cross-aisles) -- flag a few clearly.
-for gx in (-24, -8, 8, 24):
-    p.append(cross_aisle_sign("crossaisle_%d"%(gx), gx, 7.5))
-    p.append(cross_aisle_sign("crossaisle2_%d"%(gx), gx, -7.5))
+# North wall (goal end x = +44) with 4 realistic loading dock doors
+elements.append(box_model("wall_dock_end", HX, 0, W_HGT/2.0, WALL_T, W_WID, W_HGT, wall_mat))
+dock_mat = mat_custom("Warehouse/DockDoor")
+for i, dy in enumerate([-9.0, -3.0, 3.0, 9.0]):
+    elements.append(box_model(f"dock_door_{i}", HX - 0.2, dy, 2.0, 0.06, 4.2, 3.8, dock_mat, col=False))
 
-# ---- JUNCTION at x = 0 (natural gap: no rack row is placed at x=0) ----
-p.append(box("junction_lane_ns", 0, 0, 0.025, 0.16, 2*(HY+BAY_DEPTH)-1.0, 0.03, yl, col=False))   # N-S cross lane
-p.append(box("junction_pad",     0, 0, 0.015, 3.0, 3.0, 0.02, cmat("0.35 0.38 0.42 1"), col=False))  # highlighted pad
-p.append(box("junction_signL", -1.6, HY-1.0, 2.2, 0.08, 1.6, 1.0, cmat("0.95 0.75 0.05 1"), col=False))
-p.append(box("junction_signR",  1.6,-HY+1.0, 2.2, 0.08, 1.6, 1.0, cmat("0.95 0.75 0.05 1"), col=False))
+# ==========================================
+# 3. OVERHEAD TRUSSES & LIGHTING
+# ==========================================
+for tx in [-36, -24, -12, 0, 12, 24, 36]:
+    elements.append(roof_truss(f"truss_{tx}".replace("-","m"), tx))
 
+# High-bay industrial daylight illumination fixtures (visual)
+light_fixture_mat = mat_color(0.9, 0.9, 0.85, spec=0.8)
+for lx in [-30, -18, -6, 6, 18, 30]:
+    elements.append(box_model(f"ufo_light_{lx}".replace("-","m"), lx, 0, 5.0, 0.8, 0.8, 0.15, light_fixture_mat, col=False))
 
-# ---- People + object obstacles: all AHEAD of the robot's spawn (x=-16),
-# 6m lead before the first one, consistent 6m gaps, junction (x in [-3,3])
-# kept clear, and a safe buffer before the goal. Two are placed dead-CENTER
-# to force a genuine slow/avoid/reverse response, not just side-swerving. ----
-p.append(obstacle("obs_1",  -10.0, -3.0, "0.95 0.45 0.05 1"))  # orange (-y)
-p.append(person("person_1",  -4.0,  3.0, 0.0))                 # (+y)
-# ---- junction zone x in [-3, 3] kept clear ----
-p.append(obstacle("obs_2",    4.0,  0.0, "0.90 0.10 0.10 1"))  # red    CENTER (direct-path test)
-p.append(person("person_2",  10.0, -3.0, 1.57))                # (-y)
-p.append(obstacle("obs_3",   16.0,  3.0, "0.10 0.45 0.90 1"))  # blue   (+y)
-p.append(obstacle("obs_4",   22.0,  0.0, "0.95 0.80 0.05 1"))  # yellow CENTER (direct-path test)
-p.append(person("person_3",  28.0, -3.0, 0.0))                 # (-y)
-p.append(obstacle("obs_5",   34.0,  3.0, "0.55 0.10 0.75 1"))  # purple (+y)
+# ==========================================
+# 4. AWS ROBOMAKER PALLET RACKS & BOLLARDS
+# ==========================================
+# Rack positions along X (leaving gaps at x in [-6, 2] for junction/cross-aisles)
+rack_xs = [-34, -26, -18, -10, 8, 16, 24, 32]
 
+# Left side racking row (y = 5.6)
+for i, rx in enumerate(rack_xs):
+    shelf_type = "ShelfD_01" if i % 2 == 0 else "ShelfE_01"
+    # Shelves are 2.6m wide, yaw=1.5708 aligns length along X
+    elements.append(include_model(f"rack_L_{i}", f"model://aws_robomaker_warehouse_{shelf_type}", rx, 5.6, 0.0, 1.5708))
+    # Safety bollards protecting rack ends
+    if i in (0, 3, 4, 7):
+        bx = rx - 1.6 if i in (0, 4) else rx + 1.6
+        elements.append(bollard(f"bollard_L_{i}", bx, 4.6))
 
-p.append('<model name="goal_marker"><static>true</static><pose>40 0 0.6 0 0 0</pose>'
-         '<link name="link"><visual name="v"><geometry><cylinder><radius>0.4</radius>'
-         '<length>1.2</length></cylinder></geometry>%s</visual></link></model>'%cmat("0.0 0.9 0.1 1"))
+# Right side racking row (y = -5.6)
+for i, rx in enumerate(rack_xs):
+    shelf_type = "ShelfE_01" if i % 2 == 0 else "ShelfF_01"
+    elements.append(include_model(f"rack_R_{i}", f"model://aws_robomaker_warehouse_{shelf_type}", rx, -5.6, 0.0, 1.5708))
+    if i in (0, 3, 4, 7):
+        bx = rx - 1.6 if i in (0, 4) else rx + 1.6
+        elements.append(bollard(f"bollard_R_{i}", bx, -4.6))
 
-body="\n    ".join(p)
-world=('<?xml version="1.0" ?>\n<sdf version="1.6">\n  <world name="warehouse">\n'
- '    <include><uri>model://sun</uri></include>\n'
- '    <include><uri>model://ground_plane</uri></include>\n'
- '    <light name="dir1" type="directional"><pose>0 0 12 0 0 0</pose><diffuse>0.9 0.9 0.9 1</diffuse>'
- '<specular>0.2 0.2 0.2 1</specular><direction>-0.3 0.2 -1</direction><cast_shadows>true</cast_shadows></light>\n'
- '    <light name="bay1" type="point"><pose>-12 0 8 0 0 0</pose><diffuse>0.7 0.7 0.7 1</diffuse>'
- '<attenuation><range>45</range><linear>0.03</linear><constant>0.3</constant></attenuation><cast_shadows>false</cast_shadows></light>\n'
- '    <light name="bay2" type="point"><pose>0 0 8 0 0 0</pose><diffuse>0.7 0.7 0.7 1</diffuse>'
- '<attenuation><range>45</range><linear>0.03</linear><constant>0.3</constant></attenuation><cast_shadows>false</cast_shadows></light>\n'
- '    <light name="bay3" type="point"><pose>12 0 8 0 0 0</pose><diffuse>0.7 0.7 0.7 1</diffuse>'
- '<attenuation><range>45</range><linear>0.03</linear><constant>0.3</constant></attenuation><cast_shadows>false</cast_shadows></light>\n'
- '    <scene><ambient>0.55 0.55 0.55 1</ambient><background>0.72 0.76 0.82 1</background><shadows>true</shadows></scene>\n'
- '    '+body+'\n'
- '    <physics name="dp" default="0" type="ode"><max_step_size>0.001</max_step_size>'
- '<real_time_factor>1.0</real_time_factor><real_time_update_rate>1000</real_time_update_rate></physics>\n'
- '  </world>\n</sdf>\n')
-out=os.path.join(os.path.dirname(os.path.abspath(__file__)),"warehouse.world")
-open(out,"w").write(world)
-print("WROTE:",out,"(%d bytes)"%len(world))
+# ==========================================
+# 5. SIDE SCENERY & CLUTTER (NON-OBSTACLES)
+# ==========================================
+# Staged pallet jacks, clutter stacks, and trash cans along the outer rack alleys (|y| >= 8.5)
+elements.append(include_model("pallet_jack_1", "model://aws_robomaker_warehouse_PalletJackB_01", -22.0, 9.5, 0.02, 0.4))
+elements.append(include_model("pallet_jack_2", "model://aws_robomaker_warehouse_PalletJackB_01", 18.0, -9.5, 0.02, 2.8))
+
+elements.append(include_model("clutter_1", "model://aws_robomaker_warehouse_ClutteringA_01", -30.0, 10.0, 0.0, 0.0))
+elements.append(include_model("clutter_2", "model://aws_robomaker_warehouse_ClutteringC_01", 10.0, 9.8, 0.0, 1.57))
+elements.append(include_model("clutter_3", "model://aws_robomaker_warehouse_ClutteringD_01", -14.0, -10.0, 0.0, 0.0))
+elements.append(include_model("clutter_4", "model://aws_robomaker_warehouse_ClutteringA_01", 28.0, -10.0, 0.0, -1.57))
+
+elements.append(include_model("trashcan_1", "model://aws_robomaker_warehouse_TrashCanC_01", -2.0, 8.5, 0.0, 0.0))
+elements.append(include_model("trashcan_2", "model://aws_robomaker_warehouse_TrashCanC_01", 2.0, -8.5, 0.0, 3.14))
+
+elements.append(include_model("corner_dumpster_1", "model://dumpster", -41.0, 12.0, 0.0, 0.0))
+elements.append(include_model("corner_dumpster_2", "model://dumpster", 41.0, -12.0, 0.0, 3.14))
+
+# Background warehouse workers in side alleys (outside the robot corridor)
+elements.append(include_model("worker_side_1", "model://person_standing", -16.0, 9.5, 0.0, 1.2))
+elements.append(include_model("worker_side_2", "model://person_standing", 12.0, -9.5, 0.0, -0.8))
+
+# ==========================================
+# 6. IN-PATH REALISTIC WAREHOUSE OBSTACLES
+# ==========================================
+# The robot navigates from x = -38 to x = +40 along y = 0.
+# Obstacles are placed with realistic clearance to challenge avoidance and recovery:
+
+# Obstacle 1: Euro-pallet with stacked shipping boxes staged on the right (x = -24.0, y = -1.25)
+elements.append(include_model("obs1_pallet", "model://euro_pallet", -24.0, -1.25, 0.0, 0.0))
+elements.append(include_model("obs1_box1", "model://cardboard_box", -24.15, -1.25, 0.20, 0.1))
+elements.append(include_model("obs1_box2", "model://cardboard_box", -23.85, -1.25, 0.20, -0.15))
+elements.append(include_model("obs1_box3", "model://cardboard_box", -24.0, -1.25, 0.50, 0.05))
+
+# Obstacle 2: Warehouse worker standing in the left corridor checking inventory (x = -12.0, y = 1.35)
+elements.append(include_model("obs2_worker", "model://person_standing", -12.0, 1.35, 0.0, -1.57))
+
+# Obstacle 3: Industrial high-visibility construction barrel in center aisle (x = 2.0, y = 0.0)
+# (Requires robot to detect center blockage, slow down, rotate to clear path, and shift lane)
+elements.append(include_model("obs3_hazard_barrel", "model://construction_barrel", 2.0, 0.0, 0.0, 0.0))
+
+# Obstacle 4: Utility picking cart on the left side (x = 16.0, y = 1.35)
+elements.append(include_model("obs4_utility_cart", "model://utility_cart", 16.0, 1.35, 0.0, 1.57))
+
+# Obstacle 5: Staged euro-pallet with shipping boxes on the right side (x = 28.0, y = -1.25)
+elements.append(include_model("obs5_pallet", "model://euro_pallet", 28.0, -1.25, 0.0, 0.2))
+elements.append(include_model("obs5_box1", "model://cardboard_box", 28.0, -1.25, 0.20, 0.0))
+elements.append(include_model("obs5_box2", "model://cardboard_box", 28.0, -1.25, 0.50, 0.3))
+
+# ==========================================
+# 7. GOAL: HIGH-VISIBILITY AGV DOCKING STATION
+# ==========================================
+elements.append(box_model("agv_dock_pad", 40.0, 0.0, 0.02, 3.6, 3.6, 0.04, mat_color(0.1, 0.75, 0.2, spec=0.6), col=False))
+elements.append(box_model("agv_dock_beacon", 40.0, 0.0, 0.7, 0.25, 0.25, 1.4, mat_color(0.1, 0.9, 0.25, spec=0.9), col=True))
+
+body_xml = "\n    ".join(elements)
+
+world_xml = f"""<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="warehouse">
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
+
+    <!-- Balanced Industrial Lighting -->
+    <light name="main_sunlight" type="directional">
+      <pose>0 0 16 0 0 0</pose>
+      <diffuse>0.85 0.85 0.88 1</diffuse>
+      <specular>0.25 0.25 0.25 1</specular>
+      <direction>-0.25 0.25 -1</direction>
+      <cast_shadows>true</cast_shadows>
+    </light>
+
+    <light name="aisle_light_1" type="point">
+      <pose>-24 0 7.5 0 0 0</pose>
+      <diffuse>0.75 0.75 0.72 1</diffuse>
+      <attenuation><range>40</range><linear>0.02</linear><constant>0.35</constant></attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <light name="aisle_light_2" type="point">
+      <pose>-8 0 7.5 0 0 0</pose>
+      <diffuse>0.75 0.75 0.72 1</diffuse>
+      <attenuation><range>40</range><linear>0.02</linear><constant>0.35</constant></attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <light name="aisle_light_3" type="point">
+      <pose>8 0 7.5 0 0 0</pose>
+      <diffuse>0.75 0.75 0.72 1</diffuse>
+      <attenuation><range>40</range><linear>0.02</linear><constant>0.35</constant></attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <light name="aisle_light_4" type="point">
+      <pose>24 0 7.5 0 0 0</pose>
+      <diffuse>0.75 0.75 0.72 1</diffuse>
+      <attenuation><range>40</range><linear>0.02</linear><constant>0.35</constant></attenuation>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <scene>
+      <ambient>0.62 0.62 0.62 1</ambient>
+      <background>0.75 0.78 0.82 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    {body_xml}
+
+    <physics name="ode_physics" default="0" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+    </physics>
+  </world>
+</sdf>
+"""
+
+out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "warehouse.world")
+with open(out_path, "w") as f:
+    f.write(world_xml)
+print(f"Generated realistic warehouse world at: {out_path} ({len(world_xml)} bytes)")

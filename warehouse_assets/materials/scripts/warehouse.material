@@ -1,0 +1,97 @@
+material Warehouse/ConcreteFloor
+{
+  receive_shadows on
+  technique
+  {
+    pass
+    {
+      ambient 0.85 0.85 0.85 1.0
+      diffuse 0.9 0.9 0.9 1.0
+      specular 0.2 0.2 0.2 1.0 16.0
+
+      texture_unit
+      {
+        texture concrete_floor.png
+        scale 0.08 0.08
+        filtering anisotropic
+        max_anisotropy 8
+      }
+    }
+  }
+}
+
+material Warehouse/HazardStripes
+{
+  receive_shadows on
+  technique
+  {
+    pass
+    {
+      ambient 0.9 0.9 0.9 1.0
+      diffuse 1.0 1.0 1.0 1.0
+      specular 0.1 0.1 0.1 1.0 8.0
+
+      texture_unit
+      {
+        texture hazard_stripes.png
+        scale 0.5 0.5
+      }
+    }
+  }
+}
+
+material Warehouse/CorrugatedWall
+{
+  receive_shadows on
+  technique
+  {
+    pass
+    {
+      ambient 0.8 0.8 0.8 1.0
+      diffuse 0.9 0.9 0.9 1.0
+      specular 0.3 0.3 0.3 1.0 20.0
+
+      texture_unit
+      {
+        texture corrugated_wall.png
+        scale 0.2 1.0
+      }
+    }
+  }
+}
+
+material Warehouse/DockDoor
+{
+  receive_shadows on
+  technique
+  {
+    pass
+    {
+      ambient 0.9 0.9 0.9 1.0
+      diffuse 1.0 1.0 1.0 1.0
+      specular 0.2 0.2 0.2 1.0 10.0
+
+      texture_unit
+      {
+        texture dock_door.png
+      }
+    }
+  }
+}
+
+material Warehouse/SafetySign
+{
+  technique
+  {
+    pass
+    {
+      ambient 1.0 1.0 1.0 1.0
+      diffuse 1.0 1.0 1.0 1.0
+
+      texture_unit
+      {
+        texture safety_sign.png
+      }
+    }
+  }
+}
